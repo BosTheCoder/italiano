@@ -62,10 +62,19 @@ function similarity(heard, target) {
     return 1 - lev(a, b) / Math.max(a.length, b.length);
   }));
 }
+// On-device Italian recognition (newer Chrome): one download, then the check works with no connection.
+const SR_LOCAL = { langs: ['it-IT'], processLocally: true };
+let localSR = false;
+async function srStatus() {
+  try { return SR?.available ? await SR.available(SR_LOCAL) : 'unsupported'; } catch { return 'unsupported'; }
+}
+const canCheck = () => !!SR && (localSR || navigator.onLine);
+
 function listen(target, btn, out) {
   if (!SR) return Promise.resolve(null);
   return new Promise(res => {
     const r = new SR(); r.lang = 'it-IT'; r.maxAlternatives = 5; r.interimResults = false;
+    if (localSR) r.processLocally = true;
     let best = null;
     btn.classList.add('on'); out.textContent = 'Listening…';
     r.onresult = e => {
@@ -79,6 +88,31 @@ function listen(target, btn, out) {
     r.start();
   });
 }
+// No speech check available (offline, no language pack): record yourself, hear it, then the native speaker.
+let recorder;
+function recordBack(c, btn, out, after = () => play(c.id)) {
+  if (recorder) { recorder.stop?.(); return; }               // second tap stops early (ignored while the mic is starting)
+  recorder = {};
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    const chunks = [], r = recorder = new MediaRecorder(stream);
+    r.ondataavailable = e => chunks.push(e.data);
+    r.onstop = () => {
+      stream.getTracks().forEach(t => t.stop()); recorder = null; btn.classList.remove('on');
+      const me = new Audio(URL.createObjectURL(new Blob(chunks, { type: r.mimeType })));
+      out.textContent = '▶ That’s you. Now the native speaker…';
+      me.onended = () => { out.textContent = 'Tap 🎤 to try again'; after(); };
+      me.play().catch(after);
+    };
+    player.pause(); btn.classList.add('on'); out.textContent = 'Recording… tap 🎤 to stop';
+    r.start(); setTimeout(() => r.state === 'recording' && r.stop(), 5000);
+  }).catch(() => { recorder = null; out.textContent = 'Allow the microphone to record yourself.'; });
+}
+async function useMic(c, btn, out, after) {
+  if (!canCheck()) return recordBack(c, btn, out, after), null;
+  const best = await listen(c.it, btn, out); showHeard(out, best); return best;
+}
+const micHint = () => canCheck() ? 'Tap 🎤 and say it back' : 'Tap 🎤, say it, and hear yourself back';
+
 function showHeard(out, best) {
   if (!best) return;
   const pct = Math.round(best.score * 100);
@@ -106,7 +140,16 @@ function home() {
       const cs = CARDS.filter(c => c.unit === i), n = cs.filter(learned).length;
       return `<button class="unit" data-u="${i}"><span class="ic">${u.icon}</span><span style="flex:1"><span class="nm">${esc(u.name)}</span><span class="bar"><i style="width:${n / cs.length * 100}%"></i></span></span><span class="ct">${n}/${cs.length}</span></button>`;
     }).join('')}</div>
-    <button class="link" id="pb">📖 Phrasebook: tap any phrase to hear it</button>`;
+    <button class="link" id="pb">📖 Phrasebook: tap any phrase to hear it</button>
+    <div class="small" id="sr" style="text-align:center"></div>`;
+  srStatus().then(s => {
+    localSR = s === 'available';
+    const el = app.querySelector('#sr'); if (!el) return;
+    if (s === 'downloadable') {
+      el.innerHTML = '<button class="btn ghost">⬇️ Download the Italian speech check so 🎤 works offline</button>';
+      el.firstChild.onclick = async () => { el.textContent = 'Downloading…'; try { await SR.install(SR_LOCAL); } catch { } home(); };
+    } else el.textContent = { downloading: 'Downloading the Italian speech check…', available: '✅ 🎤 speech check works offline' }[s] || '';
+  });
   app.querySelector('#go').onclick = () => startLesson(null);
   app.querySelectorAll('.unit').forEach(b => b.onclick = () => startLesson(+b.dataset.u));
   app.querySelector('#pb').onclick = phrasebook;
@@ -182,14 +225,14 @@ function micBlock(c) {
   return `<div class="speak">
       <button class="circ" data-a="play" aria-label="Play">🔊</button>
       <button class="circ lem" data-a="slow" aria-label="Play slowly">🐢</button>
-      ${SR ? '<button class="circ mic" data-a="mic" aria-label="Say it">🎤</button>' : ''}
-    </div><div class="heard" id="heard">${SR ? 'Tap 🎤 and say it back' : 'Say it out loud, then compare'}</div>`;
+      <button class="circ mic" data-a="mic" aria-label="Say it">🎤</button>
+    </div><div class="heard" id="heard">${micHint()}</div>`;
 }
-function wireMic(c, onHeard) {
+function wireMic(c) {
   app.querySelector('[data-a=play]').onclick = () => play(c.id);
   app.querySelector('[data-a=slow]').onclick = () => play(c.id, true);
   const mic = app.querySelector('[data-a=mic]'), out = app.querySelector('#heard');
-  if (mic) mic.onclick = async () => { player.pause(); const b = await listen(c.it, mic, out); showHeard(out, b); onHeard?.(b); };
+  mic.onclick = () => { player.pause(); useMic(c, mic, out); };
 }
 
 function intro(c) {
@@ -238,8 +281,8 @@ function speak(c) {
   app.innerHTML = header() + `<div class="body">
     <div class="ask">Say it in Italian</div>
     <div class="tile sm">${c.pic}</div><div class="en"><b>${esc(c.en)}</b></div>
-    <div class="speak">${SR ? '<button class="circ mic big" data-a="mic" aria-label="Say it">🎤</button>' : ''}</div>
-    <div class="heard" id="heard">${SR ? 'Tap 🎤 and speak' : 'Say it out loud, then check'}</div></div>
+    <div class="speak"><button class="circ mic big" data-a="mic" aria-label="Say it">🎤</button></div>
+    <div class="heard" id="heard">${micHint()}</div></div>
     <div class="foot" id="foot"><button class="btn ghost" id="reveal">Show answer</button></div>`;
   const mic = app.querySelector('[data-a=mic]'), out = app.querySelector('#heard');
   const reveal = () => {
@@ -249,8 +292,8 @@ function speak(c) {
     app.querySelector('#miss').onclick = () => answer(c, false, true);
     app.querySelector('#got').onclick = () => answer(c, true, true);
   };
-  if (mic) mic.onclick = async () => {
-    const b = await listen(c.it, mic, out); showHeard(out, b);
+  mic.onclick = async () => {
+    const b = await useMic(c, mic, out, reveal);
     if (b && b.score >= .8) answer(c, true);
     else if (b) reveal();
   };

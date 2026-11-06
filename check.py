@@ -16,8 +16,8 @@ URL = f"http://127.0.0.1:{srv.server_port}/"
 chrome = os.environ.get("CHROME") or next(iter(glob.glob(os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome"))), None)
 
 with sync_playwright() as p:
-    b = p.chromium.launch(executable_path=chrome)
-    pg = b.new_page(viewport={"width": 390, "height": 844}, device_scale_factor=2)
+    b = p.chromium.launch(executable_path=chrome, args=["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
+    ctx = b.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, permissions=["microphone"]); pg = ctx.new_page()
     errors = []; pg.on("pageerror", lambda e: errors.append(str(e)))
     pg.goto(URL); pg.wait_for_selector("#go")
     pg.screenshot(path=SHOTS / "1-home.png")
@@ -59,6 +59,19 @@ with sync_playwright() as p:
     pg.click("#cont"); pg.click("#pb"); pg.fill("#q", "bagno")
     assert pg.locator(".pbrow").count() == 1
     pg.screenshot(path=SHOTS / "5-phrasebook.png")
+
+    # Offline: the service worker serves everything, and 🎤 falls back to record-yourself
+    pg.wait_for_function("navigator.serviceWorker.controller", timeout=30000)
+    pg.wait_for_function("caches.open('parla-audio-v1').then(c => c.keys()).then(k => k.length >= 2 * CARDS.length)", timeout=60000)
+    ctx.set_offline(True); pg.reload(); pg.wait_for_selector("#go")
+    assert pg.evaluate("document.fonts.check('20px \"Baloo 2\"')")
+    pg.click("#go"); pg.wait_for_selector("[data-a=mic]")
+    assert pg.evaluate("fetch('audio/' + L.items[0].c.id + 's.mp3').then(r => r.ok)")
+    pg.evaluate("window.LOG = []; new MutationObserver(() => LOG.push(performance.now() | 0, document.querySelector('#heard')?.textContent)).observe(document.body, {subtree: true, childList: true, characterData: true})")
+    pg.click("[data-a=mic]"); pg.wait_for_function("document.querySelector('#heard').textContent.startsWith('Recording')")
+    pg.wait_for_timeout(1200); pg.click("[data-a=mic]", force=True)   # force: the button pulses while recording
+    pg.wait_for_function("LOG.some(t => typeof t == 'string' && t.startsWith('▶'))", timeout=3000)   # stopped well before the 5 s auto-stop
+    pg.screenshot(path=SHOTS / "6-offline-record.png")
     assert not errors, errors
     b.close()
 print("OK", json.dumps({k: v["reps"] for k, v in st["cards"].items()}))
