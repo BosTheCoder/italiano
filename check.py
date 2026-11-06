@@ -48,7 +48,9 @@ with sync_playwright() as p:
         if recalls == 1:                       # make it easier, then pick wrong: comes back later
             pg.screenshot(path=SHOTS / "2-recall.png")
             pg.click("#easy"); pg.click(f".opt:not([data-id='{cid}'])")
-        elif recalls == 2:                     # choices, right answer: "hard"
+        elif recalls == 2:                     # look back at the previous answer, then choices, right answer: "hard"
+            pg.click("#prev"); pg.wait_for_selector("#past"); pg.wait_for_timeout(300); pg.screenshot(path=SHOTS / "2-lookback.png")
+            assert pg.locator("#past.bad").count() == 1; pg.click("#pc"); assert pg.locator("#past").count() == 0
             pg.click("#easy"); pg.screenshot(path=SHOTS / "2-choices.png"); pg.click(f".opt[data-id='{cid}']")
         elif recalls == 3:                     # typed with a typo: still right
             pg.fill("#ans", it[:-1] + "x" if len(it) > 6 else it); pg.click("#check")
@@ -64,9 +66,20 @@ with sync_playwright() as p:
     assert sum(c["lapses"] for c in st["cards"].values()) == 1
     assert st["day"]["xp"] > 0 and st["streak"]["count"] == 1
 
+    assert [e["r"] for e in st["log"]][:3] == ["pickwrong", "pick", "typo"], st["log"][:3]
+    missed = st["log"][0]["id"]
+
     pg.click("#cont"); pg.click("#pb"); pg.fill("#q", "bagno")
     assert pg.locator(".pbrow").count() == 1
+    pg.fill("#q", "flirting")                  # a group name finds the whole group
+    assert pg.locator(".pbrow").count() == pg.evaluate("CARDS.filter(c => UNITS[c.unit].name.startsWith('Flirting')).length")
+    pg.fill("#q", ""); pg.click(".seg button[data-t='1']")
+    assert pg.locator(".pbrow").first.get_attribute("data-id") == missed   # weakest first
     pg.screenshot(path=SHOTS / "5-phrasebook.png")
+    pg.click("#back"); pg.click("#hist"); pg.click(".seg button[data-t='1']")
+    assert pg.locator(".pbrow.miss").count() == pg.locator(".pbrow").count() == 1
+    pg.click(".seg button[data-t='0']"); pg.screenshot(path=SHOTS / "6-history.png")
+    assert pg.locator(".pbrow").count() == len(st["log"])
 
     # Offline: the service worker serves everything, audio included
     pg.wait_for_function("navigator.serviceWorker.controller", timeout=30000)

@@ -3,6 +3,7 @@ const KEY = 'italiano.v1', MIN = 60e3, DAY = 864e5, GOAL = 50;
 const AGAIN = 0, HARD = 1, GOOD = 2;   // wrong / right with choices / typed it right
 const app = document.getElementById('app');
 let S = JSON.parse(localStorage.getItem(KEY) || 'null') || { cards: {}, xp: 0, day: { date: '', xp: 0 }, streak: { last: '', count: 0 } };
+S.log ||= [];                          // every answer: {t, id, r: exact|typo|wrong|pick|pickwrong, a: what you answered}
 const save = () => localStorage.setItem(KEY, JSON.stringify(S));
 const ymd = d => d.toLocaleDateString('en-CA');
 const today = () => ymd(new Date());
@@ -27,6 +28,11 @@ function schedule(c, g, now) {
 const grade = (id, g) => { S.cards[id] = schedule(S.cards[id], g, Date.now()); save(); };
 const isDue = id => S.cards[id] && S.cards[id].due <= Date.now();
 const learned = c => (S.cards[c.id]?.reps || 0) >= 2;
+const byId = Object.fromEntries(CARDS.map(c => [c.id, c]));
+const BAD = new Set(['wrong', 'pickwrong']);
+const RES = { exact: ['✅', 'Typed it'], typo: ['✅', 'Typed it, small typo'], wrong: ['❌', 'Typed it wrong'], pick: ['🔘', 'Right with choices'], pickwrong: ['❌', 'Wrong choice'] };
+const LEVELS = ['New', 'Learning', 'Getting there', 'Strong'];
+const level = id => { const c = S.cards[id]; return !c ? 0 : c.ivl >= 7 ? 3 : c.ivl >= 1 ? 2 : 1; };
 
 // ---------- marking a typed answer ----------
 // Forgiving on accents, capitals, punctuation and "..." placeholders; a small typo still counts.
@@ -88,28 +94,69 @@ function home() {
       const cs = CARDS.filter(c => c.unit === i), n = cs.filter(learned).length;
       return `<button class="unit" data-u="${i}"><span class="ic">${u.icon}</span><span style="flex:1"><span class="nm">${esc(u.name)}</span><span class="bar"><i style="width:${n / cs.length * 100}%"></i></span></span><span class="ct">${n}/${cs.length}</span></button>`;
     }).join('')}</div>
-    <button class="link" id="pb">📖 Phrasebook: tap any phrase to hear it</button>`;
+    <div class="row"><button class="link" id="pb">📖 My phrases</button><button class="link" id="hist">🕘 History</button></div>`;
   app.querySelector('#go').onclick = () => startLesson(null);
   app.querySelectorAll('.unit').forEach(b => b.onclick = () => startLesson(+b.dataset.u));
   app.querySelector('#pb').onclick = phrasebook;
+  app.querySelector('#hist').onclick = history;
+}
+
+// Search matches the Italian, the English and the group name ("flirting" finds the whole group).
+const hay = c => norm(`${c.it} ${c.en} ${UNITS[c.unit].name}`);
+function listScreen(title, tabs, draw) {
+  app.innerHTML = `<div class="lbar"><button class="x" id="back" aria-label="Back">✕</button><b style="flex:1">${title}</b></div>
+    <input class="search" id="q" placeholder="Search Italian, English or a group" type="search">
+    <div class="seg">${tabs.map((t, i) => `<button data-t="${i}" class="${i ? '' : 'on'}">${t}</button>`).join('')}</div>
+    <div class="pb" id="list"></div>`;
+  let tab = 0;
+  const redraw = () => {
+    const q = norm(app.querySelector('#q').value);
+    app.querySelector('#list').innerHTML = draw(tab, c => !q || hay(c).includes(q));
+    app.querySelectorAll('.pbrow').forEach(b => b.onclick = () => play(b.dataset.id));
+  };
+  app.querySelectorAll('.seg button').forEach(b => b.onclick = () => {
+    tab = +b.dataset.t; app.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b)); redraw();
+  });
+  app.querySelector('#q').oninput = redraw;
+  app.querySelector('#back').onclick = home;
+  redraw();
 }
 
 function phrasebook() {
-  app.innerHTML = `<div class="lbar"><button class="x" id="back" aria-label="Back">✕</button><b style="flex:1">Phrasebook</b></div>
-    <input class="search" id="q" placeholder="Search English or Italian" type="search">
-    <div class="pb" id="list"></div>`;
-  const draw = q => {
-    q = norm(q || '');
-    app.querySelector('#list').innerHTML = UNITS.map((u, i) => {
-      const rows = CARDS.filter(c => c.unit === i && (!q || norm(c.it + ' ' + c.en).includes(q)));
-      return rows.length ? `<h2>${u.icon} ${esc(u.name)}</h2>` + rows.map(c =>
-        `<button class="pbrow" data-id="${c.id}"><span class="e">${c.pic}</span><span><span class="t">${esc(c.it)}</span><br><span>${esc(c.en)}</span><br><span class="s">${esc(c.pron)}</span></span></button>`).join('') : '';
-    }).join('');
-    app.querySelectorAll('.pbrow').forEach(b => b.onclick = () => play(b.dataset.id));
+  const tally = {};
+  for (const e of S.log) (tally[e.id] ||= [0, 0])[BAD.has(e.r) ? 1 : 0]++;
+  const row = c => {
+    const lv = level(c.id), [r, w] = tally[c.id] || [0, 0];
+    return `<button class="pbrow" data-id="${c.id}"><span class="e">${c.pic}</span><span style="flex:1"><span class="t">${esc(c.it)}</span><br><span>${esc(c.en)}</span><br><span class="s">${esc(c.pron)}</span></span>
+      <span class="lv"><span class="dots l${lv}"><i></i><i></i><i></i></span>${LEVELS[lv]}${r + w ? `<span>✓${r} ✗${w}</span>` : ''}</span></button>`;
   };
-  draw();
-  app.querySelector('#q').oninput = e => draw(e.target.value);
-  app.querySelector('#back').onclick = home;
+  // Weakest first: phrases you've met, lowest level then most-missed; unseen ones last.
+  const weak = c => { const [r, w] = tally[c.id] || [0, 0], lv = level(c.id); return (lv || 9) * 10 - w / (r + w || 1); };
+  listScreen('My phrases', ['By group', 'Weakest first'], (tab, ok) => {
+    const hit = CARDS.filter(ok);
+    if (!hit.length) return '<p class="small">No phrases match.</p>';
+    if (tab) return hit.sort((a, b) => weak(a) - weak(b)).map(row).join('');
+    return UNITS.map((u, i) => { const rows = hit.filter(c => c.unit === i); return rows.length ? `<h2>${u.icon} ${esc(u.name)}</h2>` + rows.map(row).join('') : ''; }).join('');
+  });
+}
+
+function dayName(t) {
+  const d = ymd(new Date(t));
+  return d === today() ? 'Today' : d === ymd(new Date(Date.now() - DAY)) ? 'Yesterday' : new Date(t).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+const yourAnswer = e => e.a && e.r !== 'exact' && e.r !== 'pick' ? `<br><span class="s">You: <s>${esc(e.a)}</s></span>` : '';
+function history() {
+  listScreen('History', ['All answers', 'Mistakes'], (tab, ok) => {
+    let out = '', last = '';
+    for (const e of S.log.slice().reverse()) {
+      const c = byId[e.id];
+      if (!c || !ok(c) || (tab && !BAD.has(e.r))) continue;
+      const d = dayName(e.t);
+      if (d !== last) { out += `<h2>${d}</h2>`; last = d; }
+      out += `<button class="pbrow${BAD.has(e.r) ? ' miss' : ''}" data-id="${c.id}"><span class="e">${c.pic}</span><span style="flex:1"><span class="t">${esc(c.it)}</span><br><span>${esc(c.en)}</span>${yourAnswer(e)}</span><span class="r" title="${RES[e.r][1]}">${RES[e.r][0]}</span></button>`;
+    }
+    return out || `<p class="small">${S.log.length ? 'Nothing here. Bravo!' : 'Your answers show up here after a lesson.'}</p>`;
+  });
 }
 
 // ---------- lesson ----------
@@ -138,11 +185,12 @@ function buildLesson(unit) {
   return items;
 }
 function startLesson(unit) {
-  L = { items: buildLesson(unit), i: 0, right: 0, tries: 0, xp: 0, combo: 0, fails: {} };
+  L = { items: buildLesson(unit), start: S.log.length, i: 0, right: 0, tries: 0, xp: 0, combo: 0, fails: {} };
   next();
 }
 function header() {
   return `<div class="lbar"><button class="x" id="quit" aria-label="Quit lesson">✕</button>
+    ${S.log.length > L.start ? '<button class="x" id="prev" aria-label="Previous answers">↩</button>' : ''}
     <div class="prog"><i style="width:${L.i / L.items.length * 100}%"></i></div>
     <span class="combo">${L.combo >= 3 ? '🔥' + L.combo : ''}</span></div>`;
 }
@@ -151,6 +199,25 @@ function next() {
   const it = L.items[L.i];
   (it.type === 'intro' ? intro : recall)(it.c);
   app.querySelector('#quit').onclick = home;
+  const prev = app.querySelector('#prev');
+  if (prev) prev.onclick = () => past(S.log.length - L.start - 1);
+}
+
+// Look back over this lesson's answers without losing your place.
+function past(k) {
+  const es = S.log.slice(L.start), e = es[k], c = byId[e.id];
+  document.getElementById('past')?.remove();
+  const sh = document.createElement('div');
+  sh.id = 'past'; sh.className = 'sheet ' + (BAD.has(e.r) ? 'bad' : 'ok');
+  sh.innerHTML = `<div><h2>${RES[e.r][0]} ${RES[e.r][1]}</h2><div class="small">Answer ${k + 1} of ${es.length}</div>
+    <div class="ans">${c.pic} ${esc(c.it)}</div><div>${esc(c.en)} · <i>${esc(c.pron)}</i>${yourAnswer(e)}</div>
+    <div class="speak" style="justify-content:flex-start">${sounds(c.id)}</div>
+    <div class="row"><button class="btn ghost" id="pp" ${k ? '' : 'disabled'}aria-label="Earlier answer">◀</button><button class="btn ghost" id="pn" ${k < es.length - 1 ? '' : 'disabled'}aria-label="Later answer">▶</button><button class="btn" id="pc">Close</button></div></div>`;
+  document.body.appendChild(sh);
+  wireSounds(sh);
+  sh.querySelector('#pp').onclick = () => past(k - 1);
+  sh.querySelector('#pn').onclick = () => past(k + 1);
+  sh.querySelector('#pc').onclick = () => sh.remove();
 }
 
 function intro(c) {
@@ -179,7 +246,7 @@ function recall(c) {
     e.preventDefault();
     const m = mark(input.value, c.it);
     input.disabled = true;
-    answer(c, m === 'wrong' ? AGAIN : GOOD, { typed: input.value, typo: m === 'typo' });
+    answer(c, m === 'wrong' ? AGAIN : GOOD, { r: m, a: input.value });
   };
   app.querySelector('#easy').onclick = () => {
     app.querySelector('#f').remove(); app.querySelector('#foot').remove();
@@ -190,7 +257,7 @@ function recall(c) {
       const ok = b.dataset.id === c.id;
       box.querySelectorAll('.opt').forEach(x => { x.disabled = true; if (x.dataset.id === c.id) x.classList.add('right'); });
       if (!ok) b.classList.add('wrong');
-      answer(c, ok ? HARD : AGAIN, {});
+      answer(c, ok ? HARD : AGAIN, { r: ok ? 'pick' : 'pickwrong', a: byId[b.dataset.id].it });
     });
   };
 }
@@ -201,9 +268,11 @@ function distractors(c) {
 }
 
 const PRAISE = ['Bravo!', 'Perfetto!', 'Fantastico!', 'Bellissimo!', 'Esatto!', 'Grande!'];
-function answer(c, g, { typed, typo }) {
-  const ok = g !== AGAIN;
+function answer(c, g, { r, a }) {
+  const ok = g !== AGAIN, typo = r === 'typo';
   L.tries++;
+  S.log.push({ t: Date.now(), id: c.id, r, a });
+  if (S.log.length > 5000) S.log.splice(0, S.log.length - 5000);
   grade(c.id, g);
   beep(ok);
   if (ok) { L.right++; L.combo++; L.xp += (g === GOOD ? 10 : 5) + (L.combo >= 5 ? 5 : 0); }
@@ -214,7 +283,7 @@ function answer(c, g, { typed, typo }) {
   }
   setTimeout(() => play(c.id), 300);
   const title = !ok ? 'Not quite' : typo ? 'Right, small typo' : pick(PRAISE) + (L.combo >= 3 ? ` 🔥${L.combo}` : '');
-  const yours = typed && (typo || !ok) ? `<div>You wrote: <s>${esc(typed)}</s></div>` : '';
+  const yours = a && (r === 'typo' || r === 'wrong') ? `<div>You wrote: <s>${esc(a)}</s></div>` : '';
   const sheet = document.createElement('div');
   sheet.className = 'sheet ' + (ok ? 'ok' : 'bad');
   sheet.innerHTML = `<div><h2>${title}</h2>
@@ -223,7 +292,7 @@ function answer(c, g, { typed, typo }) {
     <button class="btn ${ok ? 'go' : 'no'}" id="cont">Continue</button></div></div>`;
   document.body.appendChild(sheet);
   wireSounds(sheet);
-  sheet.querySelector('#cont').onclick = () => { sheet.remove(); L.i++; next(); };
+  sheet.querySelector('#cont').onclick = () => { sheet.remove(); document.getElementById('past')?.remove(); L.i++; next(); };
   sheet.querySelector('#cont').focus();
 }
 
