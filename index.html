@@ -13,7 +13,7 @@
 @font-face{font-family:"Baloo 2";font-weight:500 800;font-display:swap;src:url(./fonts/baloo2-latin.woff2) format("woff2")}
 :root{
   --blue:#1F4E9C; --blue-dk:#163a75; --sky:#E8F0FB; --lemon:#F6D33C; --lemon-dk:#d4b120;
-  --basil:#2E8B57; --basil-dk:#226a42; --tomato:#D7362B; --tomato-dk:#a8281f;
+  --basil:#2E8B57; --leaf:#9fd4b2; --basil-dk:#226a42; --tomato:#D7362B; --tomato-dk:#a8281f;
   --ink:#1B2340; --mute:#5b6683; --white:#fff;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -49,9 +49,8 @@ h1,h2,p{margin:0}
 .unit:active{transform:translateY(3px);box-shadow:0 1px 0 #c9d6ec}
 .unit .ic{font-size:2rem;width:48px;height:48px;display:grid;place-items:center;background:var(--sky);border-radius:14px;flex:none}
 .unit .nm{font-weight:800}
-.unit .bar{height:8px;background:var(--sky);border-radius:99px;overflow:hidden;margin-top:4px}
-.unit .bar>i{display:block;height:100%;background:var(--basil)}
-.unit .ct{font-size:.85rem;color:var(--mute);flex:none}
+.unit .bar{display:block;height:8px;background:var(--sky);border-radius:99px;overflow:hidden;margin-top:4px}
+.unit .ct{display:block;font-size:.85rem;color:var(--mute);margin-top:4px}
 .link{background:none;color:var(--blue);font-weight:800;text-decoration:underline;padding:16px 0;text-align:center;width:100%}
 
 /* lesson */

@@ -91,8 +91,10 @@ function home() {
     <div class="small">${xp >= GOAL ? 'Daily goal done. Bravo!' : `${GOAL - xp} XP to today’s goal`}</div>
     <div class="start"><button class="btn go" id="go">Start lesson</button><div class="small">${sub}</div></div>
     <div class="units">${UNITS.map((u, i) => {
-      const cs = CARDS.filter(c => c.unit === i), n = cs.filter(learned).length;
-      return `<button class="unit" data-u="${i}"><span class="ic">${u.icon}</span><span style="flex:1"><span class="nm">${esc(u.name)}</span><span class="bar"><i style="width:${n / cs.length * 100}%"></i></span></span><span class="ct">${n}/${cs.length}</span></button>`;
+      // Dark green = learned (right twice), light green = started but not learned yet.
+      const cs = CARDS.filter(c => c.unit === i), n = cs.filter(learned).length, met = cs.filter(c => S.cards[c.id]).length;
+      const a = n / cs.length * 100, b = met / cs.length * 100;
+      return `<button class="unit" data-u="${i}"><span class="ic">${u.icon}</span><span style="flex:1"><span class="nm">${esc(u.name)}</span><span class="bar" style="background:linear-gradient(90deg,var(--basil) ${a}%,var(--leaf) ${a}% ${b}%,var(--sky) ${b}%)"></span><span class="ct">${n} of ${cs.length} learned${met > n ? ` · ${met - n} started` : ''}</span></span></button>`;
     }).join('')}</div>
     <div class="row"><button class="link" id="pb">📖 My phrases</button><button class="link" id="hist">🕘 History</button></div>`;
   app.querySelector('#go').onclick = () => startLesson(null);
