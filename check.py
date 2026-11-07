@@ -27,6 +27,11 @@ with sync_playwright() as p:
       for (const g of [GOOD, GOOD, GOOD, GOOD, AGAIN]) { c = schedule(c, g, t); out.push([c.reps, Math.round(c.due / 60e3)]); }
       return out; }""")
     assert r == [[1, 10], [2, 1440], [3, 3 * 1440], [4, 8 * 1440], [0, 1]], r
+    # Practice before a phrase is due doesn't move it on; a wrong answer still does
+    early = pg.evaluate("""() => { const id = CARDS[0].id, keep = S.cards[id], now = Date.now();
+      S.cards[id] = {due: now + 10 * MIN, ivl: 0, ease: 2.5, reps: 1, lapses: 0}; grade(id, GOOD); const a = S.cards[id].reps;
+      grade(id, AGAIN); const b = S.cards[id].reps; S.cards[id] = keep; save(); return [a, b]; }""")
+    assert early == [1, 0], early
     good, hard = pg.evaluate("[GOOD, HARD].map(g => schedule({reps: 3, ivl: 3, ease: 2.5}, g, 0).ivl)")
     assert hard < good, (hard, good)
     assert pg.evaluate("mark(\"dov'e il bagno\", \"Dov'è il bagno?\")") == "exact"

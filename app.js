@@ -25,9 +25,10 @@ function schedule(c, g, now) {
   c.due = now + c.ivl * DAY;
   return c;
 }
-const grade = (id, g) => { S.cards[id] = schedule(S.cards[id], g, Date.now()); save(); };
+// A right answer before the phrase is due is just practice: it doesn't move it on, so you can't cram it to "learned".
+const grade = (id, g) => { const c = S.cards[id]; if (g !== AGAIN && c?.reps && c.due > Date.now()) return; S.cards[id] = schedule(c, g, Date.now()); save(); };
 const isDue = id => S.cards[id] && S.cards[id].due <= Date.now();
-const learned = c => (S.cards[c.id]?.reps || 0) >= 2;
+const learned = c => (S.cards[c.id]?.reps || 0) >= 3;   // right when met, again 10+ min later, and again a day+ after that
 const byId = Object.fromEntries(CARDS.map(c => [c.id, c]));
 const BAD = new Set(['wrong', 'pickwrong']);
 const RES = { exact: ['✅', 'Typed it'], typo: ['✅', 'Typed it, small typo'], wrong: ['❌', 'Typed it wrong'], pick: ['🔘', 'Right with choices'], pickwrong: ['❌', 'Wrong choice'] };
